@@ -20,8 +20,13 @@ public class InspectionRecord {
     @Column(name = "point_id", nullable = false)
     private Long pointId;
 
-    @Column(name = "template_item_id", nullable = false)
+    /** 旧版模板项ID（历史数据），新记录不再写入。 */
+    @Column(name = "template_item_id")
     private Long templateItemId;
+
+    /** 判定所依据的模板版本项目快照ID，可追溯到具体版本定义。 */
+    @Column(name = "template_version_item_id")
+    private Long templateVersionItemId;
 
     @Column(name = "item_name", length = 128)
     private String itemName = "";
@@ -63,6 +68,8 @@ public class InspectionRecord {
     public void setPointId(Long pointId) { this.pointId = pointId; }
     public Long getTemplateItemId() { return templateItemId; }
     public void setTemplateItemId(Long templateItemId) { this.templateItemId = templateItemId; }
+    public Long getTemplateVersionItemId() { return templateVersionItemId; }
+    public void setTemplateVersionItemId(Long templateVersionItemId) { this.templateVersionItemId = templateVersionItemId; }
     public String getItemName() { return itemName; }
     public void setItemName(String itemName) { this.itemName = itemName; }
     public String getItemType() { return itemType; }

@@ -17,6 +17,10 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.MySQLDialect
     open-in-view: false
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
 
 app:
   jwt-secret: ${JWT_SECRET:equipment-maintenance-admin-dev-secret-change-me-please-32bytes}

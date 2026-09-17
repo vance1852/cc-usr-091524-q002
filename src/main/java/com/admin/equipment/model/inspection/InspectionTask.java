@@ -20,6 +20,10 @@ public class InspectionTask {
     @Column(name = "template_id", nullable = false)
     private Long templateId;
 
+    /** 任务生成时冻结的模板版本，执行与判定均按该版本快照。 */
+    @Column(name = "template_version_id")
+    private Long templateVersionId;
+
     @Column(length = 16)
     private String status = "pending";
 
@@ -88,6 +92,8 @@ public class InspectionTask {
     public void setCode(String code) { this.code = code; }
     public Long getTemplateId() { return templateId; }
     public void setTemplateId(Long templateId) { this.templateId = templateId; }
+    public Long getTemplateVersionId() { return templateVersionId; }
+    public void setTemplateVersionId(Long templateVersionId) { this.templateVersionId = templateVersionId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getScheduledStart() { return scheduledStart; }

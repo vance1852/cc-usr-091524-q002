@@ -26,6 +26,8 @@ public class InspectionTaskService {
     private final InspectionPlanRepository planRepo;
     private final InspectionTemplateRepository templateRepo;
     private final InspectionTemplateItemRepository templateItemRepo;
+    private final InspectionTemplateVersionRepository templateVersionRepo;
+    private final InspectionTemplateVersionItemRepository templateVersionItemRepo;
     private final InspectionPointRepository pointRepo;
     private final EquipmentRepository equipmentRepo;
     private final WorkOrderRepository workOrderRepo;
@@ -39,6 +41,8 @@ public class InspectionTaskService {
                                  InspectionPlanRepository planRepo,
                                  InspectionTemplateRepository templateRepo,
                                  InspectionTemplateItemRepository templateItemRepo,
+                                 InspectionTemplateVersionRepository templateVersionRepo,
+                                 InspectionTemplateVersionItemRepository templateVersionItemRepo,
                                  InspectionPointRepository pointRepo,
                                  EquipmentRepository equipmentRepo,
                                  WorkOrderRepository workOrderRepo,
@@ -51,6 +55,8 @@ public class InspectionTaskService {
         this.planRepo = planRepo;
         this.templateRepo = templateRepo;
         this.templateItemRepo = templateItemRepo;
+        this.templateVersionRepo = templateVersionRepo;
+        this.templateVersionItemRepo = templateVersionItemRepo;
         this.pointRepo = pointRepo;
         this.equipmentRepo = equipmentRepo;
         this.workOrderRepo = workOrderRepo;
@@ -98,6 +104,36 @@ public class InspectionTaskService {
         return abnormalityRepo.findByTaskIdOrderByReportedAtDesc(taskId);
     }
 
+    /**
+     * 任一巡检记录的判定依据视图：项目定义、数值上下限、合格选项，
+     * 以及所属版本的发布人和发布时间。历史记录回退到旧模板项。
+     */
+    public RecordVersionDetail getRecordVersionDetail(Long recordId) {
+        InspectionRecord rec = recordRepo.findById(recordId)
+                .orElseThrow(() -> new IllegalArgumentException("巡检记录不存在"));
+        InspectionTemplateVersionItem versionItem = rec.getTemplateVersionItemId() != null
+                ? templateVersionItemRepo.findById(rec.getTemplateVersionItemId()).orElse(null) : null;
+        InspectionTemplateVersion version = versionItem != null
+                ? templateVersionRepo.findById(versionItem.getVersionId()).orElse(null) : null;
+        InspectionTemplate template = version != null
+                ? templateRepo.findById(version.getTemplateId()).orElse(null) : null;
+        InspectionTemplateItem legacyItem = null;
+        if (versionItem == null && rec.getTemplateItemId() != null) {
+            legacyItem = templateItemRepo.findById(rec.getTemplateItemId()).orElse(null);
+        }
+        if (template == null) {
+            InspectionTask task = taskRepo.findById(rec.getTaskId()).orElse(null);
+            if (task != null) template = templateRepo.findById(task.getTemplateId()).orElse(null);
+        }
+        return new RecordVersionDetail(rec, versionItem, version, template, legacyItem);
+    }
+
+    public record RecordVersionDetail(InspectionRecord record,
+                                      InspectionTemplateVersionItem versionItem,
+                                      InspectionTemplateVersion version,
+                                      InspectionTemplate template,
+                                      InspectionTemplateItem legacyItem) {}
+
     @Transactional
     public InspectionTask generateTask(Long planId, Long assigneeId, String assigneeName,
                                         boolean useOptimizedRoute, Long startPointId) {
@@ -110,6 +146,22 @@ public class InspectionTaskService {
 
         InspectionTemplate template = templateRepo.findById(plan.getTemplateId())
                 .orElseThrow(() -> new IllegalArgumentException("计划模板不存在"));
+
+        // 任务生成时冻结计划引用的模板版本；旧数据无引用时回退到当前发布版并回填计划
+        InspectionTemplateVersion version = null;
+        if (plan.getTemplateVersionId() != null) {
+            version = templateVersionRepo.findById(plan.getTemplateVersionId()).orElse(null);
+        }
+        if (version == null) {
+            version = templateVersionRepo.findFirstByTemplateIdAndStatusOrderByVersionNoDesc(
+                            plan.getTemplateId(), InspectionTemplateVersion.STATUS_PUBLISHED)
+                    .orElseThrow(() -> new IllegalArgumentException("计划模板没有已发布版本，请先发布"));
+            plan.setTemplateVersionId(version.getId());
+        }
+        if (!InspectionTemplateVersion.STATUS_PUBLISHED.equals(version.getStatus())) {
+            throw new IllegalArgumentException("计划引用的模板版本已停用，请先发布新版本");
+        }
+        final Long frozenVersionId = version.getId();
 
         LocalDateTime now = LocalDateTime.now();
         LocalDate today = now.toLocalDate();
@@ -127,6 +179,7 @@ public class InspectionTaskService {
         task.setPlanId(planId);
         task.setCode(code);
         task.setTemplateId(plan.getTemplateId());
+        task.setTemplateVersionId(frozenVersionId);
         task.setStatus("pending");
         task.setScheduledStart(winStart);
         task.setScheduledEnd(winEnd);
@@ -156,7 +209,7 @@ public class InspectionTaskService {
             Optional<InspectionPoint> pOpt = pointRepo.findById(rp.pointId);
             if (pOpt.isEmpty()) continue;
             InspectionPoint p = pOpt.get();
-            long itemCnt = templateItemRepo.countByTemplateId(plan.getTemplateId());
+            long itemCnt = templateVersionItemRepo.countByVersionId(frozenVersionId);
             InspectionTaskPoint tp = new InspectionTaskPoint();
             tp.setTaskId(savedTask.getId());
             tp.setPointId(p.getId());
@@ -225,9 +278,18 @@ public class InspectionTaskService {
         tp.setInspectorName(inspectorName == null ? "" : inspectorName);
         if (remark != null) tp.setRemark(remark);
 
-        List<InspectionTemplateItem> templateItems = templateItemRepo.findByTemplateIdOrderBySortOrderAsc(task.getTemplateId());
-        Map<Long, InspectionTemplateItem> itemMap = new HashMap<>();
-        for (InspectionTemplateItem ti : templateItems) itemMap.put(ti.getId(), ti);
+        // 正在执行和已生成的任务按冻结的模板版本判定；仅历史遗留任务（无冻结版本）回退旧模板项
+        List<InspectionTemplateVersionItem> versionItems = task.getTemplateVersionId() != null
+                ? templateVersionItemRepo.findByVersionIdOrderBySortOrderAsc(task.getTemplateVersionId())
+                : List.of();
+        Map<Long, InspectionTemplateVersionItem> versionItemMap = new HashMap<>();
+        for (InspectionTemplateVersionItem vi : versionItems) versionItemMap.put(vi.getId(), vi);
+        List<InspectionTemplateItem> legacyItems = task.getTemplateVersionId() == null
+                ? templateItemRepo.findByTemplateIdOrderBySortOrderAsc(task.getTemplateId())
+                : List.of();
+        Map<Long, InspectionTemplateItem> legacyItemMap = new HashMap<>();
+        for (InspectionTemplateItem ti : legacyItems) legacyItemMap.put(ti.getId(), ti);
+        int definedItemCount = task.getTemplateVersionId() != null ? versionItems.size() : legacyItems.size();
 
         int qualifiedCnt = 0;
         int abnormalCnt = 0;
@@ -237,16 +299,23 @@ public class InspectionTaskService {
 
         if (items != null) {
             for (PointItemSpec spec : items) {
-                InspectionTemplateItem ti = itemMap.get(spec.templateItemId());
-                if (ti == null) continue;
-                JudgeResult jr = templateService.judgeItem(ti, spec.checkValue(), spec.checkNumeric());
+                InspectionTemplateVersionItem vi = versionItemMap.get(spec.templateItemId());
+                InspectionTemplateItem legacy = (vi == null && task.getTemplateVersionId() == null)
+                        ? legacyItemMap.get(spec.templateItemId()) : null;
+                if (vi == null && legacy == null) continue;
+                String itemName = vi != null ? vi.getName() : legacy.getName();
+                String itemType = vi != null ? vi.getType() : legacy.getType();
+                JudgeResult jr = vi != null
+                        ? templateService.judgeVersionItem(vi, spec.checkValue(), spec.checkNumeric())
+                        : templateService.judgeItem(legacy, spec.checkValue(), spec.checkNumeric());
                 InspectionRecord rec = new InspectionRecord();
                 rec.setTaskId(taskId);
                 rec.setTaskPointId(taskPointId);
                 rec.setPointId(tp.getPointId());
-                rec.setTemplateItemId(ti.getId());
-                rec.setItemName(ti.getName());
-                rec.setItemType(ti.getType());
+                rec.setTemplateItemId(legacy != null ? legacy.getId() : null);
+                rec.setTemplateVersionItemId(vi != null ? vi.getId() : null);
+                rec.setItemName(itemName);
+                rec.setItemType(itemType);
                 rec.setCheckValue(spec.checkValue() == null ? "" : spec.checkValue());
                 rec.setCheckNumeric(jr.numericValue());
                 rec.setIsQualified(jr.qualified());
@@ -265,7 +334,7 @@ public class InspectionTaskService {
                     List<Long> equipIds = parseIds(tp.getEquipmentIds());
                     if (equipIds.isEmpty()) {
                         InspectionAbnormality ab = createAbnormalityIfAbsent(
-                                task, tp, savedRec, tp.getPointId(), null, null, ti, spec);
+                                task, tp, savedRec, tp.getPointId(), null, null, itemName, spec);
                         if (ab != null) {
                             newAbnormalities.add(ab);
                         }
@@ -273,7 +342,7 @@ public class InspectionTaskService {
                         for (Long eid : equipIds) {
                             Equipment eq = equipmentRepo.findById(eid).orElse(null);
                             InspectionAbnormality ab = createAbnormalityIfAbsent(
-                                    task, tp, savedRec, tp.getPointId(), eid, eq, ti, spec);
+                                    task, tp, savedRec, tp.getPointId(), eid, eq, itemName, spec);
                             if (ab != null) {
                                 newAbnormalities.add(ab);
                                 if (ab.getWorkOrderCreated() && ab.getWorkOrderId() != null) {
@@ -291,7 +360,7 @@ public class InspectionTaskService {
             long dur = Duration.between(tp.getArrivedAt(), now).getSeconds();
             tp.setDurationSeconds(dur);
         }
-        tp.setItemCount(Math.max(templateItems.size(), tp.getItemCount() == null ? 0 : tp.getItemCount()));
+        tp.setItemCount(Math.max(definedItemCount, tp.getItemCount() == null ? 0 : tp.getItemCount()));
         tp.setQualifiedCount(qualifiedCnt);
         tp.setAbnormalCount(abnormalCnt);
         tp.setIsMissed(false);
@@ -446,7 +515,7 @@ public class InspectionTaskService {
 
     private InspectionAbnormality createAbnormalityIfAbsent(InspectionTask task, InspectionTaskPoint tp,
                                                              InspectionRecord rec, Long pointId, Long equipmentId,
-                                                             Equipment eq, InspectionTemplateItem item, PointItemSpec spec) {
+                                                             Equipment eq, String itemName, PointItemSpec spec) {
         if (equipmentId != null) {
             Optional<InspectionAbnormality> existsOpt = abnormalityRepo
                     .findByTaskPointIdAndRecordIdAndEquipmentId(tp.getId(), rec.getId(), equipmentId);
@@ -460,9 +529,9 @@ public class InspectionTaskService {
         ab.setEquipmentId(equipmentId);
         ab.setEquipmentCode(eq != null ? eq.getCode() : "");
         ab.setEquipmentName(eq != null ? eq.getName() : "");
-        ab.setItemName(item.getName());
-        ab.setTitle("巡检异常-" + item.getName());
-        String desc = "巡检项[" + item.getName() + "] 不合格。判定：" + rec.getJudgeDetail();
+        ab.setItemName(itemName);
+        ab.setTitle("巡检异常-" + itemName);
+        String desc = "巡检项[" + itemName + "] 不合格。判定：" + rec.getJudgeDetail();
         if (spec != null && spec.remark() != null && !spec.remark().isEmpty()) {
             desc += " 备注：" + spec.remark();
         }

@@ -20,6 +20,10 @@ public class InspectionPlan {
     @Column(name = "template_id", nullable = false)
     private Long templateId;
 
+    /** 计划明确引用的当前发布版；发布新版本时由模板服务推进。 */
+    @Column(name = "template_version_id")
+    private Long templateVersionId;
+
     @Column(length = 16)
     private String cycleType = "daily";
 
@@ -64,6 +68,8 @@ public class InspectionPlan {
     public void setName(String name) { this.name = name; }
     public Long getTemplateId() { return templateId; }
     public void setTemplateId(Long templateId) { this.templateId = templateId; }
+    public Long getTemplateVersionId() { return templateVersionId; }
+    public void setTemplateVersionId(Long templateVersionId) { this.templateVersionId = templateVersionId; }
     public String getCycleType() { return cycleType; }
     public void setCycleType(String cycleType) { this.cycleType = cycleType; }
     public Integer getCycleValue() { return cycleValue; }

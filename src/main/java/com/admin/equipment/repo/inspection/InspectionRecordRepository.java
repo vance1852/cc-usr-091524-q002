@@ -3,6 +3,7 @@ package com.admin.equipment.repo.inspection;
 import com.admin.equipment.model.inspection.InspectionRecord;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface InspectionRecordRepository extends JpaRepository<InspectionRecord, Long> {
@@ -12,4 +13,6 @@ public interface InspectionRecordRepository extends JpaRepository<InspectionReco
     List<InspectionRecord> findByTemplateItemIdOrderByRecordedAtDesc(Long templateItemId);
     long countByTaskPointIdAndIsQualifiedFalse(Long taskPointId);
     long countByTaskPointIdAndIsAbnormalTrue(Long taskPointId);
+    boolean existsByTemplateVersionItemIdIn(Collection<Long> versionItemIds);
+    long countByTemplateVersionItemIdIn(Collection<Long> versionItemIds);
 }

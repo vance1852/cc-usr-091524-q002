@@ -4,10 +4,12 @@ import com.admin.equipment.model.inspection.InspectionPlan;
 import com.admin.equipment.model.inspection.InspectionPlanPoint;
 import com.admin.equipment.model.inspection.InspectionPoint;
 import com.admin.equipment.model.inspection.InspectionTemplate;
+import com.admin.equipment.model.inspection.InspectionTemplateVersion;
 import com.admin.equipment.repo.inspection.InspectionPlanPointRepository;
 import com.admin.equipment.repo.inspection.InspectionPlanRepository;
 import com.admin.equipment.repo.inspection.InspectionPointRepository;
 import com.admin.equipment.repo.inspection.InspectionTemplateRepository;
+import com.admin.equipment.repo.inspection.InspectionTemplateVersionRepository;
 import com.admin.equipment.service.inspection.RoutePlanningService.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,17 +22,20 @@ public class InspectionPlanService {
     private final InspectionPlanRepository planRepo;
     private final InspectionPlanPointRepository planPointRepo;
     private final InspectionTemplateRepository templateRepo;
+    private final InspectionTemplateVersionRepository templateVersionRepo;
     private final InspectionPointRepository pointRepo;
     private final RoutePlanningService routeService;
 
     public InspectionPlanService(InspectionPlanRepository planRepo,
                                   InspectionPlanPointRepository planPointRepo,
                                   InspectionTemplateRepository templateRepo,
+                                  InspectionTemplateVersionRepository templateVersionRepo,
                                   InspectionPointRepository pointRepo,
                                   RoutePlanningService routeService) {
         this.planRepo = planRepo;
         this.planPointRepo = planPointRepo;
         this.templateRepo = templateRepo;
+        this.templateVersionRepo = templateVersionRepo;
         this.pointRepo = pointRepo;
         this.routeService = routeService;
     }
@@ -65,7 +70,8 @@ public class InspectionPlanService {
 
     public record PlanSpec(String code, String name, Long templateId, String cycleType, Integer cycleValue,
                            String shiftType, String startTime, String endTime, Integer timeWindowMinutes,
-                           String teamName, String assigneeIds, String remark, List<Long> pointIds) {}
+                           String teamName, String assigneeIds, String remark, List<Long> pointIds,
+                           Long templateVersionId) {}
 
     @Transactional
     public InspectionPlan create(PlanSpec spec) {
@@ -75,11 +81,13 @@ public class InspectionPlanService {
         if (!templateRepo.existsById(spec.templateId())) throw new IllegalArgumentException("模板不存在");
         if (planRepo.existsByCode(spec.code())) throw new IllegalArgumentException("编号已存在");
         if (spec.pointIds() == null || spec.pointIds().isEmpty()) throw new IllegalArgumentException("至少选择一个巡检点");
+        Long versionId = resolvePublishedVersion(spec.templateId(), spec.templateVersionId());
 
         InspectionPlan plan = new InspectionPlan();
         plan.setCode(spec.code());
         plan.setName(spec.name());
         plan.setTemplateId(spec.templateId());
+        plan.setTemplateVersionId(versionId);
         plan.setCycleType(validCycle(spec.cycleType()));
         plan.setCycleValue(spec.cycleValue() == null ? 1 : Math.max(1, spec.cycleValue()));
         plan.setShiftType(spec.shiftType() == null ? "day" : spec.shiftType());
@@ -109,9 +117,16 @@ public class InspectionPlanService {
         InspectionPlan plan = planRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("计划不存在"));
         if (spec.name() != null && !spec.name().isBlank()) plan.setName(spec.name());
-        if (spec.templateId() != null) {
+        boolean templateChanged = false;
+        if (spec.templateId() != null && !spec.templateId().equals(plan.getTemplateId())) {
             if (!templateRepo.existsById(spec.templateId())) throw new IllegalArgumentException("模板不存在");
             plan.setTemplateId(spec.templateId());
+            templateChanged = true;
+        }
+        if (spec.templateVersionId() != null) {
+            plan.setTemplateVersionId(resolvePublishedVersion(plan.getTemplateId(), spec.templateVersionId()));
+        } else if (templateChanged) {
+            plan.setTemplateVersionId(resolvePublishedVersion(plan.getTemplateId(), null));
         }
         if (spec.cycleType() != null) plan.setCycleType(validCycle(spec.cycleType()));
         if (spec.cycleValue() != null) plan.setCycleValue(Math.max(1, spec.cycleValue()));
@@ -185,6 +200,28 @@ public class InspectionPlanService {
         }
         return useOptimized ? routeService.planOptimizedTSP(points, startPointId)
                             : routeService.planByCodeOrder(points);
+    }
+
+    /**
+     * 解析计划引用的发布版：显式指定时校验归属与状态，
+     * 否则取模板当前发布版；模板无发布版时报错提示先发布。
+     */
+    private Long resolvePublishedVersion(Long templateId, Long requestedVersionId) {
+        if (requestedVersionId != null) {
+            InspectionTemplateVersion v = templateVersionRepo.findById(requestedVersionId)
+                    .orElseThrow(() -> new IllegalArgumentException("模板版本不存在"));
+            if (!v.getTemplateId().equals(templateId)) {
+                throw new IllegalArgumentException("模板版本不属于该模板");
+            }
+            if (!InspectionTemplateVersion.STATUS_PUBLISHED.equals(v.getStatus())) {
+                throw new IllegalArgumentException("只能引用已发布的模板版本，当前状态：" + v.getStatus());
+            }
+            return v.getId();
+        }
+        return templateVersionRepo.findFirstByTemplateIdAndStatusOrderByVersionNoDesc(
+                        templateId, InspectionTemplateVersion.STATUS_PUBLISHED)
+                .map(InspectionTemplateVersion::getId)
+                .orElseThrow(() -> new IllegalArgumentException("模板尚无已发布版本，请先发布"));
     }
 
     private String validCycle(String c) {

@@ -79,6 +79,16 @@ public class InspectionTaskController {
         return ResponseEntity.ok(service.getPointRecords(taskPointId));
     }
 
+    /** 任一巡检记录的判定依据：项目定义、阈值、所属版本、发布人与发布时间。 */
+    @GetMapping("/records/{recordId}/definition")
+    public ResponseEntity<?> recordDefinition(@PathVariable Long recordId) {
+        try {
+            return ResponseEntity.ok(service.getRecordVersionDetail(recordId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("detail", e.getMessage()));
+        }
+    }
+
     @GetMapping("/{id}/abnormalities")
     public ResponseEntity<?> listAbnormalities(@PathVariable Long id) {
         if (!service.getById(id).isPresent()) {
