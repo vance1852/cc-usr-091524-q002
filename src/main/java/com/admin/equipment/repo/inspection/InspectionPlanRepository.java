@@ -12,4 +12,6 @@ public interface InspectionPlanRepository extends JpaRepository<InspectionPlan, 
     List<InspectionPlan> findAllByOrderByCodeAsc();
     List<InspectionPlan> findByEnabledTrueOrderByCodeAsc();
     List<InspectionPlan> findByTemplateId(Long templateId);
+    long countByTemplateVersionId(Long templateVersionId);
+    long countByTemplateIdAndTemplateVersionIdIsNull(Long templateId);
 }

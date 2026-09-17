@@ -20,6 +20,18 @@ public class InspectionTask {
     @Column(name = "template_id", nullable = false)
     private Long templateId;
 
+    /**
+     * 任务生成时冻结的模板版本：之后模板发布新版本、停用都不改变本任务的判定依据，
+     * 正在执行与已完成的任务始终按生成时的版本判定。版本头信息（名称、发布人、发布时间）
+     * 可通过 versionId 关联不可变版本获得。
+     * 列允许 NULL，仅为兼容 ddl-auto=update 给存量任务加列；迁移后新任务必有值。
+     */
+    @Column(name = "template_version_id")
+    private Long templateVersionId;
+
+    @Column(name = "template_version_no")
+    private Integer templateVersionNo;
+
     @Column(length = 16)
     private String status = "pending";
 
@@ -88,6 +100,10 @@ public class InspectionTask {
     public void setCode(String code) { this.code = code; }
     public Long getTemplateId() { return templateId; }
     public void setTemplateId(Long templateId) { this.templateId = templateId; }
+    public Long getTemplateVersionId() { return templateVersionId; }
+    public void setTemplateVersionId(Long templateVersionId) { this.templateVersionId = templateVersionId; }
+    public Integer getTemplateVersionNo() { return templateVersionNo; }
+    public void setTemplateVersionNo(Integer templateVersionNo) { this.templateVersionNo = templateVersionNo; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getScheduledStart() { return scheduledStart; }

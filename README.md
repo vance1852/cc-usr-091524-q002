@@ -28,7 +28,7 @@ MySQL 就绪后，应用通过 JPA 自动建表（ddl-auto=update）并在启动
 - 登录签发 JWT、获取当前用户（`/api/auth/login`、`/api/auth/me`）
 - 设备台账增删改查（`/api/equipments`，编号唯一校验）
 - 维保工单查询、创建、状态流转（`/api/work-orders`，完成时记录关闭时间）
-- 巡检点、巡检模板与周期计划维护（`/api/inspection/points`、`/api/inspection/templates`、`/api/inspection/plans`）
+- 巡检点、巡检模板（草稿/发布/停用版本流程）与周期计划维护（`/api/inspection/points`、`/api/inspection/templates`、`/api/inspection/plans`）
 - 巡检任务生成与执行、异常转工单、复检闭环和路线比较（`/api/inspection/tasks`）
 - 巡检完成率、设备历史与执行轨迹查询（`/api/inspection/stats`）
 - 仪表盘统计（`/api/dashboard/stats`）

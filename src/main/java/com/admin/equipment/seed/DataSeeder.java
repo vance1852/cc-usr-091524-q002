@@ -10,6 +10,7 @@ import com.admin.equipment.repo.WorkOrderRepository;
 import com.admin.equipment.repo.inspection.*;
 import com.admin.equipment.security.PasswordUtil;
 import com.admin.equipment.service.inspection.InspectionTemplateService;
+import org.springframework.context.annotation.Profile;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
+@Profile("!test")
 public class DataSeeder implements CommandLineRunner {
 
     private final AppUserRepository userRepo;
@@ -25,9 +27,9 @@ public class DataSeeder implements CommandLineRunner {
     private final WorkOrderRepository workOrderRepo;
     private final InspectionPointRepository pointRepo;
     private final InspectionTemplateRepository templateRepo;
-    private final InspectionTemplateItemRepository itemRepo;
     private final InspectionPlanRepository planRepo;
     private final InspectionPlanPointRepository planPointRepo;
+    private final InspectionTemplateService templateService;
 
     @Value("${app.admin-username}")
     private String adminUsername;
@@ -38,17 +40,17 @@ public class DataSeeder implements CommandLineRunner {
     public DataSeeder(AppUserRepository userRepo, EquipmentRepository equipmentRepo,
                       WorkOrderRepository workOrderRepo, InspectionPointRepository pointRepo,
                       InspectionTemplateRepository templateRepo,
-                      InspectionTemplateItemRepository itemRepo,
                       InspectionPlanRepository planRepo,
-                      InspectionPlanPointRepository planPointRepo) {
+                      InspectionPlanPointRepository planPointRepo,
+                      InspectionTemplateService templateService) {
         this.userRepo = userRepo;
         this.equipmentRepo = equipmentRepo;
         this.workOrderRepo = workOrderRepo;
         this.pointRepo = pointRepo;
         this.templateRepo = templateRepo;
-        this.itemRepo = itemRepo;
         this.planRepo = planRepo;
         this.planPointRepo = planPointRepo;
+        this.templateService = templateService;
     }
 
     @Override
@@ -146,75 +148,60 @@ public class DataSeeder implements CommandLineRunner {
 
     private List<InspectionTemplate> seedTemplates() {
         if (templateRepo.count() > 0) return templateRepo.findAllByOrderByCodeAsc();
-        List<InspectionTemplate> list = new ArrayList<>();
+        String operator = "系统初始化";
 
-        InspectionTemplate t1 = newTemplate("TPL-ROBOT-01", "注塑机（机器人）巡检模板",
-                "robot", "注塑设备日常巡检，涵盖液压、温控、模具等方面");
-        InspectionTemplate t2 = newTemplate("TPL-PUMP-01", "泵类设备巡检模板",
-                "pump", "水泵、空压机等泵类设备通用巡检项");
-        InspectionTemplate t3 = newTemplate("TPL-CONV-01", "传送带巡检模板",
-                "conveyor", "输送带设备日常巡检标准");
-        InspectionTemplate t4 = newTemplate("TPL-MOTOR-01", "电机组巡检模板",
-                "motor", "电机设备温度、振动、电气巡检");
-        InspectionTemplate t5 = newTemplate("TPL-GEN-01", "通用巡检模板",
-                "", "无设备类型绑定的通用检查项");
-        list.add(t1); list.add(t2); list.add(t3); list.add(t4); list.add(t5);
-        templateRepo.saveAll(list);
+        Long t1 = templateService.create("TPL-ROBOT-01", "注塑机（机器人）巡检模板",
+                "robot", "注塑设备日常巡检，涵盖液压、温控、模具等方面", List.of(
+                        item("液压油位", "option", null, null, "正常,偏高,偏低", "油位在标记线之间为合格", 1),
+                        item("液压油温(℃)", "numeric", 35.0, 60.0, "", "35~60度为正常范围", 2),
+                        item("模具状态", "option", null, null, "完好,磨损,损坏", "模具无明显磨损、变形", 3),
+                        item("安全门开关", "option", null, null, "正常,异常", "开合顺畅，感应正常", 4),
+                        item("异常噪声", "option", null, null, "无,轻微,明显", "有明显异响需上报", 5)
+                ), operator).getId();
+        Long t2 = templateService.create("TPL-PUMP-01", "泵类设备巡检模板",
+                "pump", "水泵、空压机等泵类设备通用巡检项", List.of(
+                        item("排气压力(MPa)", "numeric", 0.6, 0.8, "", "0.6~0.8 MPa 为正常", 1),
+                        item("运行电流(A)", "numeric", 10.0, 45.0, "", "额定电流范围内", 2),
+                        item("振动情况", "option", null, null, "无,轻微,明显", "明显振动需检修", 3),
+                        item("油位/液位", "option", null, null, "正常,偏低,偏高", "液位在刻度范围内", 4),
+                        item("出气管路", "option", null, null, "正常,漏气,堵塞", "管路无漏气堵塞", 5)
+                ), operator).getId();
+        Long t3 = templateService.create("TPL-CONV-01", "传送带巡检模板",
+                "conveyor", "输送带设备日常巡检标准", List.of(
+                        item("皮带张紧度", "option", null, null, "合适,过松,过紧", "按下皮带下陷约10mm", 1),
+                        item("皮带磨损", "option", null, null, "正常,轻微,严重", "明显磨损需更换", 2),
+                        item("滚筒转速", "numeric", 40.0, 60.0, "", "40-60 rpm 正常", 3),
+                        item("紧急停止", "option", null, null, "有效,失效", "按下可立即停止运行", 4),
+                        item("跑偏情况", "option", null, null, "无,轻微,严重", "严重跑偏需立即调整", 5)
+                ), operator).getId();
+        Long t4 = templateService.create("TPL-MOTOR-01", "电机组巡检模板",
+                "motor", "电机设备温度、振动、电气巡检", List.of(
+                        item("定子温度(℃)", "numeric", 20.0, 85.0, "", "20~85度正常", 1),
+                        item("轴承温度(℃)", "numeric", 20.0, 70.0, "", "20~70度正常", 2),
+                        item("三相电流平衡", "option", null, null, "平衡,轻微偏差,严重偏差", "偏差<10%为合格", 3),
+                        item("绝缘电阻", "option", null, null, "合格,偏低,不合格", "≥0.5MΩ为合格", 4),
+                        item("风扇运转", "option", null, null, "正常,异响,不转", "风扇无异常且转动顺畅", 5)
+                ), operator).getId();
+        Long t5 = templateService.create("TPL-GEN-01", "通用巡检模板",
+                "", "无设备类型绑定的通用检查项", List.of(
+                        item("外观完整性", "option", null, null, "完好,轻微破损,严重破损", "设备外观完整", 1),
+                        item("仪表显示", "option", null, null, "正常,异常,不显示", "仪表读数正常可读", 2),
+                        item("环境卫生", "option", null, null, "整洁,一般,较差", "周边环境整洁无杂物", 3)
+                ), operator).getId();
 
-        itemRepo.saveAll(List.of(
-                newItem(t1.getId(), "液压油位", "option", 1,
-                        null, null, "正常,偏高,偏低", "油位在标记线之间为合格"),
-                newItem(t1.getId(), "液压油温(℃)", "numeric", 2,
-                        35.0, 60.0, "", "35~60度为正常范围"),
-                newItem(t1.getId(), "模具状态", "option", 3,
-                        null, null, "完好,磨损,损坏", "模具无明显磨损、变形"),
-                newItem(t1.getId(), "安全门开关", "option", 4,
-                        null, null, "正常,异常", "开合顺畅，感应正常"),
-                newItem(t1.getId(), "异常噪声", "option", 5,
-                        null, null, "无,轻微,明显", "有明显异响需上报"),
+        templateService.publish(t1, "初始发布", operator);
+        templateService.publish(t2, "初始发布", operator);
+        templateService.publish(t3, "初始发布", operator);
+        templateService.publish(t4, "初始发布", operator);
+        templateService.publish(t5, "初始发布", operator);
 
-                newItem(t2.getId(), "排气压力(MPa)", "numeric", 1,
-                        0.6, 0.8, "", "0.6~0.8 MPa 为正常"),
-                newItem(t2.getId(), "运行电流(A)", "numeric", 2,
-                        10.0, 45.0, "", "额定电流范围内"),
-                newItem(t2.getId(), "振动情况", "option", 3,
-                        null, null, "无,轻微,明显", "明显振动需检修"),
-                newItem(t2.getId(), "油位/液位", "option", 4,
-                        null, null, "正常,偏低,偏高", "液位在刻度范围内"),
-                newItem(t2.getId(), "出气管路", "option", 5,
-                        null, null, "正常,漏气,堵塞", "管路无漏气堵塞"),
+        System.out.println("已初始化巡检模板种子数据 (5个模板，各发布v1)");
+        return templateRepo.findAllByOrderByCodeAsc();
+    }
 
-                newItem(t3.getId(), "皮带张紧度", "option", 1,
-                        null, null, "合适,过松,过紧", "按下皮带下陷约10mm"),
-                newItem(t3.getId(), "皮带磨损", "option", 2,
-                        null, null, "正常,轻微,严重", "明显磨损需更换"),
-                newItem(t3.getId(), "滚筒转速", "numeric", 3,
-                        40.0, 60.0, "", "40-60 rpm 正常"),
-                newItem(t3.getId(), "紧急停止", "option", 4,
-                        null, null, "有效,失效", "按下可立即停止运行"),
-                newItem(t3.getId(), "跑偏情况", "option", 5,
-                        null, null, "无,轻微,严重", "严重跑偏需立即调整"),
-
-                newItem(t4.getId(), "定子温度(℃)", "numeric", 1,
-                        20.0, 85.0, "", "20~85度正常"),
-                newItem(t4.getId(), "轴承温度(℃)", "numeric", 2,
-                        20.0, 70.0, "", "20~70度正常"),
-                newItem(t4.getId(), "三相电流平衡", "option", 3,
-                        null, null, "平衡,轻微偏差,严重偏差", "偏差<10%为合格"),
-                newItem(t4.getId(), "绝缘电阻", "option", 4,
-                        null, null, "合格,偏低,不合格", "≥0.5MΩ为合格"),
-                newItem(t4.getId(), "风扇运转", "option", 5,
-                        null, null, "正常,异响,不转", "风扇无异常且转动顺畅"),
-
-                newItem(t5.getId(), "外观完整性", "option", 1,
-                        null, null, "完好,轻微破损,严重破损", "设备外观完整"),
-                newItem(t5.getId(), "仪表显示", "option", 2,
-                        null, null, "正常,异常,不显示", "仪表读数正常可读"),
-                newItem(t5.getId(), "环境卫生", "option", 3,
-                        null, null, "整洁,一般,较差", "周边环境整洁无杂物")
-        ));
-        System.out.println("已初始化巡检模板种子数据 (" + list.size() + "个模板)");
-        return list;
+    private InspectionTemplateService.ItemSpec item(String name, String type, Double min, Double max,
+                                                      String options, String criteria, int sort) {
+        return new InspectionTemplateService.ItemSpec(name, type, min, max, options, criteria, sort);
     }
 
     private void seedPlans(List<InspectionPoint> points, List<InspectionTemplate> templates) {
@@ -302,29 +289,6 @@ public class DataSeeder implements CommandLineRunner {
         p.setEquipmentIds(equipIds);
         p.setEquipmentType(type);
         return p;
-    }
-
-    private InspectionTemplate newTemplate(String code, String name, String type, String desc) {
-        InspectionTemplate t = new InspectionTemplate();
-        t.setCode(code);
-        t.setName(name);
-        t.setEquipmentType(type);
-        t.setDescription(desc);
-        return t;
-    }
-
-    private InspectionTemplateItem newItem(Long tplId, String name, String type, int sort,
-                                            Double min, Double max, String options, String criteria) {
-        InspectionTemplateItem i = new InspectionTemplateItem();
-        i.setTemplateId(tplId);
-        i.setName(name);
-        i.setType(type);
-        i.setSortOrder(sort);
-        i.setNormalMin(min);
-        i.setNormalMax(max);
-        i.setQualifiedOptions(options);
-        i.setJudgeCriteria(criteria);
-        return i;
     }
 
     private InspectionPlan newPlan(String code, String name, Long tplId, String cycle, int cycleVal,

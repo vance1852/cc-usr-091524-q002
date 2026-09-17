@@ -14,4 +14,5 @@ public interface InspectionTaskRepository extends JpaRepository<InspectionTask, 
     List<InspectionTask> findByScheduledStartBetweenOrderByCreatedAtDesc(LocalDateTime start, LocalDateTime end);
     boolean existsByPlanIdAndScheduledStartBetween(Long planId, LocalDateTime start, LocalDateTime end);
     long countByStatus(String status);
+    long countByTemplateVersionId(Long templateVersionId);
 }

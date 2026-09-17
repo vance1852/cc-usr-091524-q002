@@ -24,7 +24,6 @@ public class InspectionTaskService {
     private final InspectionRecordRepository recordRepo;
     private final InspectionAbnormalityRepository abnormalityRepo;
     private final InspectionPlanRepository planRepo;
-    private final InspectionTemplateRepository templateRepo;
     private final InspectionTemplateItemRepository templateItemRepo;
     private final InspectionPointRepository pointRepo;
     private final EquipmentRepository equipmentRepo;
@@ -37,7 +36,6 @@ public class InspectionTaskService {
                                  InspectionRecordRepository recordRepo,
                                  InspectionAbnormalityRepository abnormalityRepo,
                                  InspectionPlanRepository planRepo,
-                                 InspectionTemplateRepository templateRepo,
                                  InspectionTemplateItemRepository templateItemRepo,
                                  InspectionPointRepository pointRepo,
                                  EquipmentRepository equipmentRepo,
@@ -49,7 +47,6 @@ public class InspectionTaskService {
         this.recordRepo = recordRepo;
         this.abnormalityRepo = abnormalityRepo;
         this.planRepo = planRepo;
-        this.templateRepo = templateRepo;
         this.templateItemRepo = templateItemRepo;
         this.pointRepo = pointRepo;
         this.equipmentRepo = equipmentRepo;
@@ -108,8 +105,13 @@ public class InspectionTaskService {
             throw new IllegalArgumentException("该计划已禁用");
         }
 
-        InspectionTemplate template = templateRepo.findById(plan.getTemplateId())
-                .orElseThrow(() -> new IllegalArgumentException("计划模板不存在"));
+        // 任务生成瞬间冻结实际生效的模板版本：之后发布/停用都不再影响本任务
+        InspectionTemplateVersion frozenVersion = planService.resolveEffectiveVersion(plan);
+        List<InspectionTemplateItem> frozenItems =
+                templateItemRepo.findByVersionIdOrderBySortOrderAsc(frozenVersion.getId());
+        if (frozenItems.isEmpty()) {
+            throw new IllegalStateException("冻结版本缺少巡检项目，无法生成任务");
+        }
 
         LocalDateTime now = LocalDateTime.now();
         LocalDate today = now.toLocalDate();
@@ -127,6 +129,8 @@ public class InspectionTaskService {
         task.setPlanId(planId);
         task.setCode(code);
         task.setTemplateId(plan.getTemplateId());
+        task.setTemplateVersionId(frozenVersion.getId());
+        task.setTemplateVersionNo(frozenVersion.getVersionNo());
         task.setStatus("pending");
         task.setScheduledStart(winStart);
         task.setScheduledEnd(winEnd);
@@ -156,7 +160,7 @@ public class InspectionTaskService {
             Optional<InspectionPoint> pOpt = pointRepo.findById(rp.pointId);
             if (pOpt.isEmpty()) continue;
             InspectionPoint p = pOpt.get();
-            long itemCnt = templateItemRepo.countByTemplateId(plan.getTemplateId());
+            int itemCnt = frozenItems.size();
             InspectionTaskPoint tp = new InspectionTaskPoint();
             tp.setTaskId(savedTask.getId());
             tp.setPointId(p.getId());
@@ -167,7 +171,7 @@ public class InspectionTaskService {
             tp.setCoordX(p.getCoordX());
             tp.setCoordY(p.getCoordY());
             tp.setEquipmentIds(p.getEquipmentIds());
-            tp.setItemCount((int) itemCnt);
+            tp.setItemCount(itemCnt);
             tp.setQualifiedCount(0);
             tp.setAbnormalCount(0);
             tp.setIsMissed(false);
@@ -225,7 +229,12 @@ public class InspectionTaskService {
         tp.setInspectorName(inspectorName == null ? "" : inspectorName);
         if (remark != null) tp.setRemark(remark);
 
-        List<InspectionTemplateItem> templateItems = templateItemRepo.findByTemplateIdOrderBySortOrderAsc(task.getTemplateId());
+        // 始终使用任务生成时冻结的版本判定，正在执行/已完成任务不受后续发布影响
+        List<InspectionTemplateItem> templateItems =
+                templateItemRepo.findByVersionIdOrderBySortOrderAsc(task.getTemplateVersionId());
+        if (templateItems.isEmpty()) {
+            throw new IllegalStateException("任务冻结的模板版本缺少项目数据");
+        }
         Map<Long, InspectionTemplateItem> itemMap = new HashMap<>();
         for (InspectionTemplateItem ti : templateItems) itemMap.put(ti.getId(), ti);
 
@@ -245,8 +254,14 @@ public class InspectionTaskService {
                 rec.setTaskPointId(taskPointId);
                 rec.setPointId(tp.getPointId());
                 rec.setTemplateItemId(ti.getId());
+                rec.setTemplateVersionId(task.getTemplateVersionId());
+                rec.setTemplateVersionNo(task.getTemplateVersionNo());
                 rec.setItemName(ti.getName());
                 rec.setItemType(ti.getType());
+                rec.setNormalMin(ti.getNormalMin());
+                rec.setNormalMax(ti.getNormalMax());
+                rec.setQualifiedOptions(ti.getQualifiedOptions());
+                rec.setJudgeCriteria(ti.getJudgeCriteria());
                 rec.setCheckValue(spec.checkValue() == null ? "" : spec.checkValue());
                 rec.setCheckNumeric(jr.numericValue());
                 rec.setIsQualified(jr.qualified());

@@ -1,0 +1,18 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:inspection_test;MODE=MySQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=20000
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+    open-in-view: false
+
+app:
+  jwt-secret: test-secret-test-secret-test-secret-32bytes
+  admin-username: admin
+  admin-password: admin123

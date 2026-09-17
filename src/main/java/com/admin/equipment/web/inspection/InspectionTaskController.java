@@ -3,6 +3,7 @@ package com.admin.equipment.web.inspection;
 import com.admin.equipment.model.WorkOrder;
 import com.admin.equipment.model.inspection.*;
 import com.admin.equipment.service.inspection.InspectionTaskService;
+import com.admin.equipment.service.inspection.InspectionTemplateService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,9 +17,12 @@ import java.util.Map;
 public class InspectionTaskController {
 
     private final InspectionTaskService service;
+    private final InspectionTemplateService templateService;
 
-    public InspectionTaskController(InspectionTaskService service) {
+    public InspectionTaskController(InspectionTaskService service,
+                                     InspectionTemplateService templateService) {
         this.service = service;
+        this.templateService = templateService;
     }
 
     public record GenerateRequest(Long planId, Long assigneeId, String assigneeName,
@@ -77,6 +81,27 @@ public class InspectionTaskController {
     @GetMapping("/points/{taskPointId}/records")
     public ResponseEntity<?> listPointRecords(@PathVariable Long taskPointId) {
         return ResponseEntity.ok(service.getPointRecords(taskPointId));
+    }
+
+    /** 查看任一巡检记录当时采用的项目定义、阈值、发布人与发布时间。 */
+    @GetMapping("/records/{recordId}/definition")
+    public ResponseEntity<?> recordDefinition(@PathVariable Long recordId) {
+        try {
+            return ResponseEntity.ok(templateService.getRecordDefinition(recordId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("detail", e.getMessage()));
+        }
+    }
+
+    /** 一次查看任务下全部记录的判定标准快照。 */
+    @GetMapping("/{id}/record-definitions")
+    public ResponseEntity<?> taskRecordDefinitions(@PathVariable Long id) {
+        if (service.getById(id).isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("detail", "任务不存在"));
+        }
+        return ResponseEntity.ok(service.getTaskRecords(id).stream()
+                .map(r -> templateService.getRecordDefinition(r.getId()))
+                .toList());
     }
 
     @GetMapping("/{id}/abnormalities")

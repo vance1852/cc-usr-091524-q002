@@ -12,4 +12,5 @@ public interface InspectionRecordRepository extends JpaRepository<InspectionReco
     List<InspectionRecord> findByTemplateItemIdOrderByRecordedAtDesc(Long templateItemId);
     long countByTaskPointIdAndIsQualifiedFalse(Long taskPointId);
     long countByTaskPointIdAndIsAbnormalTrue(Long taskPointId);
+    long countByTemplateVersionId(Long templateVersionId);
 }

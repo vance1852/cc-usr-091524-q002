@@ -3,6 +3,11 @@ package com.admin.equipment.model.inspection;
 import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
+/**
+ * 模板版本中的单个检查项目，归属于某个不可变的 {@link InspectionTemplateVersion}。
+ * 行本身也不再被修改：需要调整项目时，应修改草稿后发布一个新版本，
+ * 新版本复制全部项目并赋予新的 versionId，旧项目原样保留以供历史记录追溯。
+ */
 @Entity
 @Table(name = "inspection_template_items")
 public class InspectionTemplateItem {
@@ -11,8 +16,9 @@ public class InspectionTemplateItem {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "template_id", nullable = false)
-    private Long templateId;
+    /** 允许 NULL 仅为兼容 ddl-auto=update 给存量 items 表加列；迁移后及新数据必有值。 */
+    @Column(name = "version_id")
+    private Long versionId;
 
     @Column(nullable = false, length = 128)
     private String name;
@@ -40,8 +46,8 @@ public class InspectionTemplateItem {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
-    public Long getTemplateId() { return templateId; }
-    public void setTemplateId(Long templateId) { this.templateId = templateId; }
+    public Long getVersionId() { return versionId; }
+    public void setVersionId(Long versionId) { this.versionId = versionId; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public String getType() { return type; }

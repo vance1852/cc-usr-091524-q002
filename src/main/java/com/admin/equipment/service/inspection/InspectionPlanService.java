@@ -4,10 +4,12 @@ import com.admin.equipment.model.inspection.InspectionPlan;
 import com.admin.equipment.model.inspection.InspectionPlanPoint;
 import com.admin.equipment.model.inspection.InspectionPoint;
 import com.admin.equipment.model.inspection.InspectionTemplate;
+import com.admin.equipment.model.inspection.InspectionTemplateVersion;
 import com.admin.equipment.repo.inspection.InspectionPlanPointRepository;
 import com.admin.equipment.repo.inspection.InspectionPlanRepository;
 import com.admin.equipment.repo.inspection.InspectionPointRepository;
 import com.admin.equipment.repo.inspection.InspectionTemplateRepository;
+import com.admin.equipment.repo.inspection.InspectionTemplateVersionRepository;
 import com.admin.equipment.service.inspection.RoutePlanningService.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,17 +22,20 @@ public class InspectionPlanService {
     private final InspectionPlanRepository planRepo;
     private final InspectionPlanPointRepository planPointRepo;
     private final InspectionTemplateRepository templateRepo;
+    private final InspectionTemplateVersionRepository versionRepo;
     private final InspectionPointRepository pointRepo;
     private final RoutePlanningService routeService;
 
     public InspectionPlanService(InspectionPlanRepository planRepo,
                                   InspectionPlanPointRepository planPointRepo,
                                   InspectionTemplateRepository templateRepo,
+                                  InspectionTemplateVersionRepository versionRepo,
                                   InspectionPointRepository pointRepo,
                                   RoutePlanningService routeService) {
         this.planRepo = planRepo;
         this.planPointRepo = planPointRepo;
         this.templateRepo = templateRepo;
+        this.versionRepo = versionRepo;
         this.pointRepo = pointRepo;
         this.routeService = routeService;
     }
@@ -63,16 +68,42 @@ public class InspectionPlanService {
         return ordered;
     }
 
-    public record PlanSpec(String code, String name, Long templateId, String cycleType, Integer cycleValue,
+    public record PlanSpec(String code, String name, Long templateId, Long templateVersionId,
+                           String cycleType, Integer cycleValue,
                            String shiftType, String startTime, String endTime, Integer timeWindowMinutes,
                            String teamName, String assigneeIds, String remark, List<Long> pointIds) {}
+
+    /**
+     * 解析计划应引用的发布版本：显式指定则校验该版本属于该模板且处于 published；
+     * 未指定则取模板当前发布版。模板未发布或已停用时不允许建计划。
+     */
+    private InspectionTemplateVersion resolveVersion(Long templateId, Long explicitVersionId) {
+        InspectionTemplate t = templateRepo.findById(templateId)
+                .orElseThrow(() -> new IllegalArgumentException("模板不存在"));
+        if ("disabled".equals(t.getStatus())) {
+            throw new IllegalArgumentException("模板已停用，不能被计划引用");
+        }
+        if (explicitVersionId != null) {
+            InspectionTemplateVersion v = versionRepo.findById(explicitVersionId)
+                    .orElseThrow(() -> new IllegalArgumentException("指定的模板版本不存在"));
+            if (!v.getTemplateId().equals(templateId)) {
+                throw new IllegalArgumentException("模板版本不属于该模板");
+            }
+            if (!"published".equals(v.getStatus())) {
+                throw new IllegalArgumentException("该版本已停用(状态:" + v.getStatus() + ")，不能引用");
+            }
+            return v;
+        }
+        return versionRepo.findCurrent(templateId)
+                .orElseThrow(() -> new IllegalArgumentException("模板尚未发布版本，不能创建计划"));
+    }
 
     @Transactional
     public InspectionPlan create(PlanSpec spec) {
         if (spec.code() == null || spec.code().isBlank()) throw new IllegalArgumentException("编号必填");
         if (spec.name() == null || spec.name().isBlank()) throw new IllegalArgumentException("名称必填");
         if (spec.templateId() == null) throw new IllegalArgumentException("模板必填");
-        if (!templateRepo.existsById(spec.templateId())) throw new IllegalArgumentException("模板不存在");
+        InspectionTemplateVersion version = resolveVersion(spec.templateId(), spec.templateVersionId());
         if (planRepo.existsByCode(spec.code())) throw new IllegalArgumentException("编号已存在");
         if (spec.pointIds() == null || spec.pointIds().isEmpty()) throw new IllegalArgumentException("至少选择一个巡检点");
 
@@ -80,6 +111,7 @@ public class InspectionPlanService {
         plan.setCode(spec.code());
         plan.setName(spec.name());
         plan.setTemplateId(spec.templateId());
+        applyTemplateVersion(plan, spec.templateId(), spec.templateVersionId(), version);
         plan.setCycleType(validCycle(spec.cycleType()));
         plan.setCycleValue(spec.cycleValue() == null ? 1 : Math.max(1, spec.cycleValue()));
         plan.setShiftType(spec.shiftType() == null ? "day" : spec.shiftType());
@@ -109,9 +141,14 @@ public class InspectionPlanService {
         InspectionPlan plan = planRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("计划不存在"));
         if (spec.name() != null && !spec.name().isBlank()) plan.setName(spec.name());
-        if (spec.templateId() != null) {
-            if (!templateRepo.existsById(spec.templateId())) throw new IllegalArgumentException("模板不存在");
-            plan.setTemplateId(spec.templateId());
+        if (spec.templateId() != null || spec.templateVersionId() != null) {
+            Long templateId = spec.templateId() != null ? spec.templateId() : plan.getTemplateId();
+            // 显式传 templateVersionId 时按其值（含 null=跟随当前）处理；都不传则保持原引用
+            Long wantedVersionId = spec.templateId() != null
+                    ? spec.templateVersionId()
+                    : (spec.templateVersionId() != null ? spec.templateVersionId() : plan.getTemplateVersionId());
+            InspectionTemplateVersion version = resolveVersion(templateId, wantedVersionId);
+            applyTemplateVersion(plan, templateId, wantedVersionId, version);
         }
         if (spec.cycleType() != null) plan.setCycleType(validCycle(spec.cycleType()));
         if (spec.cycleValue() != null) plan.setCycleValue(Math.max(1, spec.cycleValue()));
@@ -185,6 +222,40 @@ public class InspectionPlanService {
         }
         return useOptimized ? routeService.planOptimizedTSP(points, startPointId)
                             : routeService.planByCodeOrder(points);
+    }
+
+    private void applyTemplateVersion(InspectionPlan plan, Long templateId, Long explicitVersionId,
+                                       InspectionTemplateVersion resolved) {
+        plan.setTemplateId(templateId);
+        if (explicitVersionId != null) {
+            plan.setTemplateVersionId(resolved.getId());
+            plan.setTemplateVersionNo(resolved.getVersionNo());
+        } else {
+            // null 表示跟随当前发布版：版本列均留空，任务生成时再解析当前发布版
+            plan.setTemplateVersionId(null);
+            plan.setTemplateVersionNo(null);
+        }
+        templateRepo.findById(templateId).ifPresent(t -> plan.setTemplateCode(t.getCode()));
+    }
+
+    /**
+     * 任务生成时调用：解析计划此刻实际生效的发布版本。
+     * 计划显式绑定版本时永远返回该版本；跟随当前的计划取模板当前发布版。
+     */
+    @Transactional(readOnly = true)
+    public InspectionTemplateVersion resolveEffectiveVersion(InspectionPlan plan) {
+        InspectionTemplateVersion v;
+        if (plan.getTemplateVersionId() != null) {
+            v = versionRepo.findById(plan.getTemplateVersionId())
+                    .orElseThrow(() -> new IllegalStateException("计划绑定的模板版本已不存在"));
+        } else {
+            v = versionRepo.findCurrent(plan.getTemplateId())
+                    .orElseThrow(() -> new IllegalStateException("模板当前没有可用于生成任务的发布版本"));
+        }
+        if ("retired".equals(v.getStatus())) {
+            throw new IllegalStateException("模板已停用，不能生成新任务（历史任务仍按原版本判定）");
+        }
+        return v;
     }
 
     private String validCycle(String c) {
